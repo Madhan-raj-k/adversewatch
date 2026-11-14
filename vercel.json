@@ -1,0 +1,2 @@
+{"functions":{"api/index.py":{"maxDuration":60,"includeFiles":"{api/core.py,public/index.html}"}},
+ "rewrites":[{"source":"/(.*)","destination":"/api/index"}]}

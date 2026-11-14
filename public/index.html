@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdverseWatch - drug-reaction memory for clinics</title>
+<style>
+body{font-family:system-ui,Segoe UI,Arial;margin:0;background:#f4f7fb;color:#1c2b3a}
+header{background:#0f5c8c;color:#fff;padding:14px 22px}header h1{margin:0;font-size:22px}header small{opacity:.85}
+.disc{background:#fff3cd;border-bottom:2px solid #e0b100;padding:8px 22px;font-weight:600;font-size:14px}
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 22px}
+.card{background:#fff;border-radius:10px;padding:14px;box-shadow:0 1px 4px #0002}
+h2{font-size:16px;margin:0 0 10px}label{font-size:13px;display:block;margin-top:6px}
+input,select{width:100%;padding:7px;border:1px solid #bcd;border-radius:6px;box-sizing:border-box}
+button{background:#0f5c8c;color:#fff;border:0;border-radius:6px;padding:8px 12px;margin-top:8px;cursor:pointer}
+button.alt{background:#5a6b7b}.res{margin-top:10px;padding:10px;border-radius:8px;font-size:14px}
+.NONE{background:#e6f6ea;border-left:5px solid #2e9e4f}.HIGH{background:#fde8e8;border-left:5px solid #c62828}.CAUTION{background:#fff4e0;border-left:5px solid #ef8f00}
+.mem{font-family:monospace;font-size:12px;background:#0d1b2a;color:#9fe0c0;padding:8px;border-radius:6px;max-height:220px;overflow:auto;white-space:pre-wrap}
+.modes{font-size:12px;color:#456}.full{grid-column:1/3}.sbs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+</style></head><body>
+<header><h1>AdverseWatch</h1><small>Drug-reaction memory agent for small clinics &middot; powered by Hindsight memory + Groq &middot; Team Phoenix (SJCIT)</small></header>
+<div class="disc">&#9888; DEMO ONLY &mdash; NOT MEDICAL ADVICE. All patients are FICTIONAL synthetic data. Not clinically validated. Always use clinical judgement.</div>
+<div class="wrap">
+ <div class="card"><h2>1. Patient</h2><select id="pat"></select><div id="pnote" class="modes"></div>
+  <button class="alt" onclick="resetLoop()">Reset learning-loop patient (fresh memory)</button>
+  <div class="modes" id="modes"></div></div>
+ <div class="card"><h2>2. Log visit / reaction &rarr; Hindsight retain</h2>
+  <label>Drug prescribed</label><input id="vdrug" value="amoxicillin">
+  <label>Adverse reaction (blank if none)</label><input id="vreac" placeholder="e.g. itchy rash on trunk day 2">
+  <label>Outcome / what worked (optional)</label><input id="vout" placeholder="e.g. tolerated well">
+  <button onclick="logVisit()">Log visit (retain)</button></div>
+ <div class="card full"><h2>3. Check a new prescription &mdash; Memory OFF vs ON (same drug)</h2>
+  <input id="cdrug" value="cephalexin" style="max-width:300px"> <button onclick="check()">Check prescription</button>
+  <div class="sbs"><div><b>Memory OFF</b><div id="off"></div></div><div><b>Memory ON (Hindsight recall)</b><div id="on"></div></div></div></div>
+ <div class="card"><h2>Memory operations log</h2><div class="mem" id="ops">(retain / recall calls appear here)</div></div>
+ <div class="card"><h2>Patient timeline (from memory)</h2><div class="mem" id="tl"></div><button class="alt" onclick="timeline()">Refresh timeline</button></div>
+</div>
+<script>
+let run=localStorage.aw_run||(localStorage.aw_run=Math.random().toString(36).slice(2,7));
+let clog=JSON.parse(localStorage.aw_log||"[]");
+const pid=()=>{const v=pat.value;return v==="P001"?"P001-"+run:v};
+const op=t=>{ops.textContent=(new Date().toLocaleTimeString())+"  "+t+"\n\n"+(ops.textContent.startsWith("(")?"":ops.textContent)};
+async function j(u,b){const r=await fetch(u,b?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}:{});if(!r.ok)throw new Error(await r.text());return r.json()}
+async function init(){const h=await j("/api/health");modes.innerHTML="Memory: <b>"+h.memory_mode+"</b><br>LLM: <b>"+h.llm_mode+"</b>";
+ const p=await j("/api/patients");pat.innerHTML=p.patients.map(x=>`<option value="${x.id}">${x.name}, ${x.age}</option>`).join("");
+ pat.onchange=()=>{pnote.textContent=p.patients.find(x=>x.id===pat.value).note;timeline()};pat.onchange()}
+function resetLoop(){run=localStorage.aw_run=Math.random().toString(36).slice(2,7);clog=[];localStorage.aw_log="[]";op("New learning-loop patient id "+pid());timeline()}
+async function logVisit(){const b={patient_id:pid(),drug:vdrug.value,reaction:vreac.value,outcome:vout.value};op("RETAIN ... "+JSON.stringify(b));
+ const r=await j("/api/visit",b);clog.push({pid:pid(),text:r.memory_op.text,date:new Date().toISOString().slice(0,10)});localStorage.aw_log=JSON.stringify(clog);
+ op("RETAINED tags="+JSON.stringify(r.memory_op.tags)+"\n"+r.memory_op.text);timeline()}
+function card(r){const a=r.assessment;let h=`<div class="res ${a.level}"><b>${a.level==="NONE"?"No flag":"FLAG: "+a.level}</b> &middot; ${a.drug} (${a.drug_class})<br>${r.explanation}`;
+ a.flags.forEach(f=>h+=`<br>&bull; ${f.why} &mdash; <i>past visit ${f.date}</i>`);a.worked_before.forEach(w=>h+=`<br>&#10003; Worked before: ${w.drug} (${w.date})`);
+ return h+`<div class="modes">${r.memory_mode} &middot; ${r.llm_mode} &middot; recalled ${r.recalled.length} memories</div></div>`}
+async function check(){off.innerHTML=on.innerHTML="checking...";const d=cdrug.value;
+ const [a,b]=await Promise.all([j("/api/check",{patient_id:pid(),drug:d,memory:false}),j("/api/check",{patient_id:pid(),drug:d,memory:true,client_log:clog})]);
+ off.innerHTML=card(a);on.innerHTML=card(b);op("RECALL query=\""+b.recall_query+"\"\n"+b.recalled.map(m=>"  - "+m.text).join("\n"))}
+async function timeline(){const r=await j("/api/timeline/"+pid());let items=r.items.map(x=>x.text);clog.filter(c=>c.pid===pid()).forEach(c=>{if(!items.includes(c.text))items.push(c.text)});
+ tl.textContent=items.length?items.join("\n\n"):"(no memories yet for this patient)"}
+init();
+</script></body></html>
